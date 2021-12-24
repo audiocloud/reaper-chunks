@@ -7,6 +7,9 @@ extern crate nom;
 use std::collections::HashMap;
 use std::convert::identity;
 
+pub use parser::parse_element;
+pub use reaper::Project;
+
 pub(self) mod parser;
 pub(self) mod reaper;
 
@@ -39,7 +42,15 @@ impl<'a> RElement<'a> {
             .unwrap_or_else(|| "")
     }
 
-    pub fn elements_of_tag<'b>(&'a self, tag: &'b str) -> impl Iterator<Item = &'b RElement<'a>>
+    pub fn get_num_attr(&'a self, name: &'a str) -> f64 {
+        self.attributes
+            .get(name)
+            .and_then(|x| x.first())
+            .and_then(RValue::get_num)
+            .unwrap_or_else(|| 0.0)
+    }
+
+    pub fn children_with_tag<'b>(&'a self, tag: &'b str) -> impl Iterator<Item = &'b RElement<'a>>
     where
         'a: 'b,
     {
@@ -128,6 +139,13 @@ impl<'a> RValue<'a> {
             RValue::QS(s) => Some(s.as_str()),
             RValue::S(s) => Some(s),
             RValue::N(_) => None,
+        }
+    }
+
+    pub fn get_num(&'a self) -> Option<f64> {
+        match self {
+            RValue::N(f) => Some(*f),
+            _ => None,
         }
     }
 }
