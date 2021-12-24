@@ -46,7 +46,7 @@ where
 {
     input.split_at_position_complete(|item| {
         let c = item.as_char();
-        !(c.is_alpha() || c.is_digit(16) || c == '=' || c == '+')
+        !(c.is_alpha() || c.is_digit(16) || c == '=' || c == '+' || c == '/')
     })
 }
 

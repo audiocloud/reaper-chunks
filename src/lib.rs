@@ -5,6 +5,7 @@
 extern crate nom;
 
 use std::collections::HashMap;
+use std::convert::identity;
 
 pub(self) mod parser;
 pub(self) mod reaper;
@@ -145,7 +146,7 @@ impl<'a> ToString for RValue<'a> {
                         '\\' => escape_seq('\\'),
                         c => [Some(c), None],
                     })
-                    .filter_map(|x| x)
+                    .filter_map(identity)
                     .collect::<String>();
                 format!("\"{value}\"")
             }
@@ -162,5 +163,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_simple_chunk() {}
+    fn test_element_str() {
+        let v = RValue::S("foo");
+        assert_eq!(v.get_str(), Some("foo"));
+
+        let v = RValue::N(5.0);
+        assert_eq!(v.get_str(), None);
+    }
+
+    #[test]
+    fn test_arg_not_exists() {
+        let v = RElement {
+            tag: "PROJECT",
+            args: vec![],
+            attributes: Default::default(),
+            bin_data: vec![],
+            children: vec![],
+            fragment_index: vec![],
+        };
+
+        assert_eq!(v.get_str_arg(0), "");
+    }
 }

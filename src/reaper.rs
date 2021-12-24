@@ -53,5 +53,7 @@ mod test {
             .1;
         let project = Project(element);
         assert_eq!(project.tracks().len(), 2);
+        assert_eq!(project.tracks()[0].name(), "quando una stella");
+        assert_eq!(project.tracks()[1].name(), "oltre a queste nubi");
     }
 }
