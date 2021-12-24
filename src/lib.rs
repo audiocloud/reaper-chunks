@@ -1,5 +1,6 @@
 #![feature(assert_matches)]
 #![feature(iter_intersperse)]
+
 #[macro_use]
 extern crate nom;
 
@@ -16,6 +17,33 @@ pub struct RElement<'a> {
     pub bin_data: Vec<&'a str>,
     pub children: Vec<RElement<'a>>,
     pub fragment_index: Vec<RFragmentId<'a>>,
+}
+
+impl<'a> RElement<'a> {
+    pub fn get_str_arg(&'a self, index: usize) -> &'a str {
+        self.args
+            .get(index)
+            .and_then(RValue::get_str)
+            .unwrap_or_else(|| "")
+    }
+
+    pub fn get_str_attr<'b>(&'a self, name: &'b str) -> &'b str
+    where
+        'a: 'b,
+    {
+        self.attributes
+            .get(name)
+            .and_then(|x| x.first())
+            .and_then(RValue::get_str)
+            .unwrap_or_else(|| "")
+    }
+
+    pub fn elements_of_tag<'b>(&'a self, tag: &'b str) -> impl Iterator<Item = &'b RElement<'a>>
+    where
+        'a: 'b,
+    {
+        self.children.iter().filter(move |child| child.tag == tag)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -93,10 +121,34 @@ pub enum RValue<'a> {
     N(f64),
 }
 
+impl<'a> RValue<'a> {
+    pub fn get_str(&'a self) -> Option<&'a str> {
+        match self {
+            RValue::QS(s) => Some(s.as_str()),
+            RValue::S(s) => Some(s),
+            RValue::N(_) => None,
+        }
+    }
+}
+
 impl<'a> ToString for RValue<'a> {
     fn to_string(&self) -> String {
         match self {
-            RValue::QS(value) => format!("\"{value}\""),
+            RValue::QS(value) => {
+                let escape_seq = |c: char| ['\\', c].map(Some);
+                let value = value
+                    .chars()
+                    .flat_map(|c| match c {
+                        '"' => escape_seq('"'),
+                        '\t' => escape_seq('t'),
+                        '\n' => escape_seq('n'),
+                        '\\' => escape_seq('\\'),
+                        c => [Some(c), None],
+                    })
+                    .filter_map(|x| x)
+                    .collect::<String>();
+                format!("\"{value}\"")
+            }
             RValue::S(s) => s.to_string(),
             RValue::N(n) => n.to_string(),
         }
