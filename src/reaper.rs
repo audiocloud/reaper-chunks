@@ -3,7 +3,7 @@ use crate::{RElement, RValue};
 pub struct Project<'a>(pub RElement<'a>);
 
 impl<'a> Project<'a> {
-    pub fn reaper_version(&'a self) -> &'a str {
+    pub fn reaper_version(&'a self) -> Option<&'a str> {
         self.0.get_str_arg(1)
     }
 
@@ -15,8 +15,8 @@ impl<'a> Project<'a> {
 pub struct Track<'a>(pub &'a RElement<'a>);
 
 impl<'a> Track<'a> {
-    pub fn name(&'a self) -> &'a str {
-        self.0.get_str_attr("NAME")
+    pub fn name(&'a self) -> Option<&'a str> {
+        self.0.get_str_attr("NAME", 0)
     }
 
     pub fn items(&'a self) -> Vec<Item<'a>> {
@@ -27,8 +27,8 @@ impl<'a> Track<'a> {
 pub struct Item<'a>(pub &'a RElement<'a>);
 
 impl<'a> Item<'a> {
-    pub fn len(&'a self) -> f64 {
-        self.0.get_num_attr("LENGTH")
+    pub fn len(&'a self) -> Option<f64> {
+        self.0.get_num_attr("LENGTH", 0)
     }
 }
 
@@ -43,12 +43,10 @@ mod test {
     fn simple_rpp_version_test() {
         let input = r#"<REAPER_PROJECT 0.1 "6.42/macOS-arm64" 1640001046
         >"#;
-        let element = crate::parser::parse_element::<(_, ErrorKind)>(input)
-            .unwrap()
-            .1;
+        let element = crate::parser::parse_element::<(_, ErrorKind)>(input).unwrap().1;
 
         let project = Project(element);
-        assert_eq!(project.reaper_version(), "6.42/macOS-arm64")
+        assert_eq!(project.reaper_version(), Some("6.42/macOS-arm64"))
     }
 
     #[test]
@@ -61,13 +59,11 @@ mod test {
             NAME "oltre a queste nubi"
         >
         >"#;
-        let element = crate::parser::parse_element::<(_, ErrorKind)>(input)
-            .unwrap()
-            .1;
+        let element = crate::parser::parse_element::<(_, ErrorKind)>(input).unwrap().1;
         let project = Project(element);
         assert_eq!(project.tracks().len(), 2);
-        assert_eq!(project.tracks()[0].name(), "quando una stella");
-        assert_eq!(project.tracks()[1].name(), "oltre a queste nubi");
+        assert_eq!(project.tracks()[0].name(), Some("quando una stella"));
+        assert_eq!(project.tracks()[1].name(), Some("oltre a queste nubi"));
     }
 
     #[test]
@@ -80,13 +76,11 @@ mod test {
             >
         >
         >"#;
-        let element = crate::parser::parse_element::<(_, ErrorKind)>(input)
-            .unwrap()
-            .1;
+        let element = crate::parser::parse_element::<(_, ErrorKind)>(input).unwrap().1;
 
         let project = Project(element);
         assert_eq!(project.tracks().len(), 1);
         assert_eq!(project.tracks()[0].items().len(), 1);
-        assert_float_relative_eq!(project.tracks()[0].items()[0].len(), 5.01, 0.01);
+        assert_float_relative_eq!(project.tracks()[0].items()[0].len().unwrap_or_default(), 5.01, 0.01);
     }
 }

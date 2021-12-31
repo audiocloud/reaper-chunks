@@ -11,32 +11,27 @@ use nom::{AsChar, IResult, InputTakeAtPosition};
 
 use crate::parser::whitespace::whitespace_line_ending;
 use crate::parser::{number, values};
-use crate::{RElement, RElementFragment, RFragmentId, RValue};
+use crate::{RElement, RFragment, RFragmentId, RValue};
 
 use super::identifier::parse_identifier;
 use super::quoted_string::parse_quoted_string;
 use super::whitespace::{multispace_no_newline_0, multispace_no_newline_1};
 
-pub(crate) fn parse_attribute<'a, E>(input: &'a str) -> IResult<&'a str, RElementFragment<'a>, E>
+pub(crate) fn parse_attribute<'a, E>(input: &'a str) -> IResult<&'a str, RFragment<'a>, E>
 where
     E: ParseError<&'a str> + FromExternalError<&'a str, std::num::ParseIntError>,
 {
     map(
-        tuple((
-            terminated(parse_identifier, multispace_no_newline_1),
-            values::parse_value_list,
-        )),
-        |(id, values)| RElementFragment::Attribute(id, values),
+        tuple((terminated(parse_identifier, multispace_no_newline_1), values::parse_value_list)),
+        |(id, values)| RFragment::Attribute(id, values),
     )(input)
 }
 
-pub(crate) fn parse_child_element<'a, E>(
-    input: &'a str,
-) -> IResult<&'a str, RElementFragment<'a>, E>
+pub(crate) fn parse_child_element<'a, E>(input: &'a str) -> IResult<&'a str, RFragment<'a>, E>
 where
     E: ParseError<&'a str> + FromExternalError<&'a str, std::num::ParseIntError>,
 {
-    map(parse_element, RElementFragment::Child)(input)
+    map(parse_element, RFragment::Child)(input)
 }
 
 pub fn parse_bin_data_body<T, E: ParseError<T>>(input: T) -> IResult<T, T, E>
@@ -50,16 +45,14 @@ where
     })
 }
 
-pub(crate) fn parse_bin_data<'a, E>(input: &'a str) -> IResult<&'a str, RElementFragment<'a>, E>
+pub(crate) fn parse_bin_data<'a, E>(input: &'a str) -> IResult<&'a str, RFragment<'a>, E>
 where
     E: ParseError<&'a str> + FromExternalError<&'a str, std::num::ParseIntError>,
 {
-    map(parse_bin_data_body, RElementFragment::BinData)(input)
+    map(parse_bin_data_body, RFragment::BinData)(input)
 }
 
-pub(crate) fn parse_element_fragment<'a, E>(
-    input: &'a str,
-) -> IResult<&'a str, RElementFragment<'a>, E>
+pub(crate) fn parse_element_fragment<'a, E>(input: &'a str) -> IResult<&'a str, RFragment<'a>, E>
 where
     E: ParseError<&'a str> + FromExternalError<&'a str, std::num::ParseIntError>,
 {
@@ -70,7 +63,7 @@ where
                 parse_child_element,
                 parse_attribute,
                 parse_bin_data,
-                map(success(""), |_| RElementFragment::Empty),
+                map(success(""), |_| RFragment::Empty),
             )),
             whitespace_line_ending,
         ),
@@ -85,38 +78,12 @@ where
         tuple((
             terminated(parse_identifier, multispace_no_newline_0),
             terminated(values::parse_value_list, whitespace_line_ending),
-            fold_many0(
-                parse_element_fragment,
-                RElement::default,
-                |mut element, fragment| {
-                    match fragment {
-                        RElementFragment::Child(c) => {
-                            element
-                                .fragment_index
-                                .push(RFragmentId::Child(element.children.len()));
-                            element.children.push(c)
-                        }
-                        RElementFragment::Attribute(id, values) => {
-                            element.fragment_index.push(RFragmentId::Attribute(id));
-                            element.attributes.insert(id, values);
-                        }
-                        RElementFragment::BinData(bin_data) => {
-                            element
-                                .fragment_index
-                                .push(RFragmentId::BinData(element.bin_data.len()));
-                            element.bin_data.push(bin_data);
-                        }
-                        RElementFragment::Empty => {}
-                    }
-                    element
-                },
-            ),
+            fold_many0(parse_element_fragment, RElement::default, |mut element, fragment| {
+                element.content.push(fragment);
+                element
+            }),
         )),
-        |(tag, args, element)| RElement {
-            tag,
-            args,
-            ..element
-        },
+        |(tag, args, element)| RElement { tag, args, ..element },
     )(input)
 }
 
@@ -124,11 +91,7 @@ pub fn parse_element<'a, E>(input: &'a str) -> IResult<&'a str, RElement<'a>, E>
 where
     E: ParseError<&'a str> + FromExternalError<&'a str, std::num::ParseIntError>,
 {
-    delimited(
-        char('<'),
-        parse_element_body,
-        tuple((multispace0, char('>'))),
-    )(input)
+    delimited(char('<'), parse_element_body, tuple((multispace0, char('>'))))(input)
 }
 
 #[cfg(test)]
@@ -137,7 +100,13 @@ mod test {
 
     use nom::error::ErrorKind;
 
+    use crate::is_fragment_attribute;
+
     use super::*;
+
+    fn contains_attribute(v: &Vec<RFragment>, name: &str) -> bool {
+        v.iter().filter_map(is_fragment_attribute(name)).next().is_some()
+    }
 
     #[test]
     fn identifier() {
@@ -151,13 +120,7 @@ mod test {
     fn simple_tag() {
         assert_matches!(
             parse_element::<(&'static str, ErrorKind)>("<RENDER_CFG\n>"),
-            Ok((
-                "",
-                RElement {
-                    tag: "RENDER_CFG",
-                    ..
-                }
-            ))
+            Ok(("", RElement { tag: "RENDER_CFG", .. }))
         );
     }
 
@@ -193,10 +156,10 @@ mod test {
                 RElement {
                     tag: "METRONOME",
                     args,
-                    attributes,
+                    content,
                     ..
                 }
-            )) if matches!(&args[..], &[RValue::N(6.0), RValue::N(2.0)]) && attributes.contains_key("VOL") && attributes.contains_key("MULT")
+            )) if matches!(&args[..], &[RValue::N(6.0), RValue::N(2.0)]) && contains_attribute(&content, "VOL") && contains_attribute(&content, "MULT")
         );
     }
 

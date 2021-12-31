@@ -41,14 +41,8 @@ fn test() {
     let (_, parsed) = reaper_chunks::parse_element(input)?; // parsed: RElement
 
     let mut total_length = 0.0;
-    for track in &parsed.children {
-        if track.tag != "TRACK" {
-            continue;
-        }
-        for media_item in &track.children {
-            if media_item.tag != "ITEM" {
-                continue;
-            }
+    for track in parsed.children_with_tag("TRACK") {
+        for media_item in track.children_with_tag("ITEM") {
             total_length += media_item.get_num_attr("LENGTH");
         }
     }

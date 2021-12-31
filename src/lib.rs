@@ -1,5 +1,6 @@
 #![feature(assert_matches)]
 #![feature(iter_intersperse)]
+#![feature(format_args_capture)]
 
 #[macro_use]
 extern crate nom;
@@ -7,54 +8,89 @@ extern crate nom;
 use std::collections::HashMap;
 use std::convert::identity;
 
+use nom::combinator::value;
+
 pub use parser::parse_element;
 pub use reaper::Project;
 
 pub(self) mod parser;
 pub(self) mod reaper;
 
+#[derive(Debug, PartialEq)]
+pub enum RFragment<'a> {
+    Attribute(&'a str, Vec<RValue<'a>>),
+    Child(RElement<'a>),
+    BinData(&'a str),
+    Empty,
+}
+
+pub(crate) fn is_fragment_attribute<'a, 'b>(name: &'b str) -> impl Fn(&'a RFragment<'a>) -> Option<&'a Vec<RValue<'a>>> + 'b
+where
+    'a: 'b,
+{
+    move |frag| match frag {
+        RFragment::Attribute(attrib_name, values) if *attrib_name == name => Some(values),
+        _ => None,
+    }
+}
+
+pub(crate) fn is_child_tag<'a, 'b>(tag: &'b str) -> impl Fn(&'a RFragment<'a>) -> Option<&'a RElement<'a>> + 'b {
+    move |frag| match frag {
+        RFragment::Child(c) if c.tag == tag => Some(c),
+        _ => None,
+    }
+}
+
 #[derive(Default, Debug, PartialEq)]
 pub struct RElement<'a> {
     pub tag: &'a str,
     pub args: Vec<RValue<'a>>,
-    pub attributes: HashMap<&'a str, Vec<RValue<'a>>>,
-    pub bin_data: Vec<&'a str>,
-    pub children: Vec<RElement<'a>>,
-    pub fragment_index: Vec<RFragmentId<'a>>,
+    pub content: Vec<RFragment<'a>>,
 }
 
 impl<'a> RElement<'a> {
-    pub fn get_str_arg(&'a self, index: usize) -> &'a str {
-        self.args
-            .get(index)
-            .and_then(RValue::get_str)
-            .unwrap_or_else(|| "")
+    pub fn append_attribute(&mut self, name: &'a str, values: Vec<RValue<'a>>) {
+        self.content.push(RFragment::Attribute(name, values));
     }
 
-    pub fn get_str_attr<'b>(&'a self, name: &'b str) -> &'b str
+    pub fn append_bin_data(&mut self, data: &'a str) {
+        self.content.push(RFragment::BinData(data));
+    }
+
+    pub fn append_child(&mut self, child: RElement<'a>) {
+        self.content.push(RFragment::Child(child));
+    }
+
+    pub fn get_str_arg(&'a self, index: usize) -> Option<&'a str> {
+        self.args.get(index).and_then(RValue::get_str)
+    }
+
+    pub fn get_str_attr<'b>(&'a self, name: &'b str, index: usize) -> Option<&'b str>
     where
         'a: 'b,
     {
-        self.attributes
-            .get(name)
+        self.content
+            .iter()
+            .filter_map(is_fragment_attribute(name))
+            .nth(index)
             .and_then(|x| x.first())
             .and_then(RValue::get_str)
-            .unwrap_or_else(|| "")
     }
 
-    pub fn get_num_attr(&'a self, name: &'a str) -> f64 {
-        self.attributes
-            .get(name)
+    pub fn get_num_attr(&'a self, name: &'a str, index: usize) -> Option<f64> {
+        self.content
+            .iter()
+            .filter_map(is_fragment_attribute(name))
+            .nth(index)
             .and_then(|x| x.first())
             .and_then(RValue::get_num)
-            .unwrap_or_else(|| 0.0)
     }
 
-    pub fn children_with_tag<'b>(&'a self, tag: &'b str) -> impl Iterator<Item = &'b RElement<'a>>
+    pub fn children_with_tag<'b>(&'a self, tag: &'b str) -> impl Iterator<Item = &'a RElement<'a>> + 'b
     where
         'a: 'b,
     {
-        self.children.iter().filter(move |child| child.tag == tag)
+        self.content.iter().filter_map(is_child_tag(tag))
     }
 }
 
@@ -82,24 +118,19 @@ impl<'a> RElement<'a> {
 
         rv.push_str(&format!("{prefix}<{tag}{arg_space}{args}\n"));
 
-        for frag_index in &self.fragment_index {
-            match frag_index {
-                RFragmentId::Attribute(id) => {
-                    if let Some(value_list) = self.attributes.get(id) {
-                        let value_list = Self::value_list_to_string(value_list);
-                        rv.push_str(&format!("{inner_prefix}{id} {value_list}\n"));
-                    }
+        for frag in &self.content {
+            match frag {
+                RFragment::Attribute(id, value_list) => {
+                    let value_list = Self::value_list_to_string(value_list);
+                    rv.push_str(&format!("{inner_prefix}{id} {value_list}\n"));
                 }
-                RFragmentId::BinData(index) => {
-                    if let Some(bin_data) = self.bin_data.get(*index) {
-                        rv.push_str(&format!("{inner_prefix}{bin_data}\n"));
-                    }
+                RFragment::BinData(bin_data) => {
+                    rv.push_str(&format!("{inner_prefix}{bin_data}\n"));
                 }
-                RFragmentId::Child(index) => {
-                    if let Some(child) = self.children.get(*index) {
-                        rv.push_str(&child.to_string_with_indent(indent + 1));
-                    }
+                RFragment::Child(child) => {
+                    rv.push_str(&child.to_string_with_indent(indent + 1));
                 }
+                RFragment::Empty => rv.push_str("\n"),
             }
         }
 
@@ -108,19 +139,8 @@ impl<'a> RElement<'a> {
     }
 
     fn value_list_to_string(values: &Vec<RValue>) -> String {
-        values
-            .iter()
-            .map(ToString::to_string)
-            .intersperse_with(|| " ".to_owned())
-            .collect()
+        values.iter().map(ToString::to_string).intersperse_with(|| " ".to_owned()).collect()
     }
-}
-
-pub(crate) enum RElementFragment<'a> {
-    Child(RElement<'a>),
-    Attribute(&'a str, Vec<RValue<'a>>),
-    BinData(&'a str),
-    Empty,
 }
 
 #[derive(Debug, PartialEq)]
@@ -147,6 +167,30 @@ impl<'a> RValue<'a> {
             RValue::N(f) => Some(*f),
             _ => None,
         }
+    }
+
+    pub fn f_vec<I: IntoIterator<Item = f64>>(values: I) -> Vec<Self> {
+        let mut rv = vec![];
+        for v in values {
+            rv.push(RValue::N(v));
+        }
+        rv
+    }
+
+    pub fn s_vec<I: IntoIterator<Item = &'a str>>(values: I) -> Vec<Self> {
+        let mut rv = vec![];
+        for v in values {
+            rv.push(RValue::S(v));
+        }
+        rv
+    }
+
+    pub fn i_vec<I: IntoIterator<Item = i64>>(values: I) -> Vec<Self> {
+        Self::f_vec(values.into_iter().map(|i| i as f64))
+    }
+
+    pub fn i(i: i64) -> Vec<Self> {
+        Self::i_vec([i])
     }
 }
 
@@ -194,12 +238,22 @@ mod tests {
         let v = RElement {
             tag: "PROJECT",
             args: vec![],
-            attributes: Default::default(),
-            bin_data: vec![],
-            children: vec![],
-            fragment_index: vec![],
+            content: vec![],
         };
 
-        assert_eq!(v.get_str_arg(0), "");
+        assert_eq!(v.get_str_arg(0), None);
+        assert_eq!(v.get_num_attr("FOO", 0), None);
+    }
+
+    #[test]
+    fn test_arg_wrong_type() {
+        let v = RElement {
+            tag: "PROJECT",
+            args: vec![RValue::N(0.5)],
+            content: vec![RFragment::Attribute("FOO", vec![RValue::S("test")])],
+        };
+
+        assert_eq!(v.get_str_arg(0), None);
+        assert_eq!(v.get_num_attr("FOO", 0), None);
     }
 }
