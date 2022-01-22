@@ -1,7 +1,3 @@
-#![feature(assert_matches)]
-#![feature(iter_intersperse)]
-#![feature(format_args_capture)]
-
 #[macro_use]
 extern crate nom;
 
@@ -34,7 +30,10 @@ where
     }
 }
 
-pub(crate) fn is_child_tag<'a, 'b>(tag: &'b str) -> impl Fn(&'a RFragment<'a>) -> Option<&'a RElement<'a>> + 'b {
+pub(crate) fn is_child_tag<'a, 'b>(tag: &'b str) -> impl Fn(&'a RFragment<'a>) -> Option<&'a RElement<'a>> + 'b
+where
+    'a: 'b,
+{
     move |frag| match frag {
         RFragment::Child(c) if c.tag == tag => Some(c),
         _ => None,
@@ -116,16 +115,31 @@ impl<'a> RElement<'a> {
         let args = Self::value_list_to_string(&self.args);
         let arg_space = if self.args.len() > 0 { " " } else { "" };
 
-        rv.push_str(&format!("{prefix}<{tag}{arg_space}{args}\n"));
+        rv.push_str(&format!(
+            "{prefix}<{tag}{arg_space}{args}\n",
+            prefix = &prefix,
+            tag = &tag,
+            arg_space = &arg_space,
+            args = &args
+        ));
 
         for frag in &self.content {
             match frag {
                 RFragment::Attribute(id, value_list) => {
                     let value_list = Self::value_list_to_string(value_list);
-                    rv.push_str(&format!("{inner_prefix}{id} {value_list}\n"));
+                    rv.push_str(&format!(
+                        "{inner_prefix}{id} {value_list}\n",
+                        inner_prefix = &inner_prefix,
+                        id = &id,
+                        value_list = &value_list
+                    ));
                 }
                 RFragment::BinData(bin_data) => {
-                    rv.push_str(&format!("{inner_prefix}{bin_data}\n"));
+                    rv.push_str(&format!(
+                        "{inner_prefix}{bin_data}\n",
+                        inner_prefix = &inner_prefix,
+                        bin_data = &bin_data
+                    ));
                 }
                 RFragment::Child(child) => {
                     rv.push_str(&child.to_string_with_indent(indent + 1));
@@ -134,12 +148,19 @@ impl<'a> RElement<'a> {
             }
         }
 
-        rv.push_str(&format!("{prefix}>\n"));
+        rv.push_str(&format!("{prefix}>\n", prefix = &prefix));
         rv
     }
 
     fn value_list_to_string(values: &Vec<RValue>) -> String {
-        values.iter().map(ToString::to_string).intersperse_with(|| " ".to_owned()).collect()
+        let mut rv = String::new();
+        for (i, value) in values.iter().enumerate() {
+            if i != 0 {
+                rv.push_str(" ");
+            }
+            rv.push_str(value.to_string().as_str());
+        }
+        rv
     }
 }
 
@@ -151,6 +172,62 @@ pub enum RValue<'a> {
     S(&'a str),
     /// Integer
     N(f64),
+}
+
+pub struct RValues;
+
+impl RValues {
+    pub fn floats<'a, I: IntoIterator<Item = f64>>(values: I) -> Vec<RValue<'a>> {
+        let mut rv = vec![];
+        for v in values {
+            rv.push(RValue::N(v));
+        }
+        rv
+    }
+
+    pub fn ints<'a, I: IntoIterator<Item = i64>>(values: I) -> Vec<RValue<'a>> {
+        Self::floats(values.into_iter().map(|i| i as f64))
+    }
+
+    pub fn bools<'a, I: IntoIterator<Item = bool>>(values: I) -> Vec<RValue<'a>> {
+        Self::ints(values.into_iter().map(|x| if x { 1 } else { 0 }))
+    }
+
+    pub fn strings<'a, I: IntoIterator<Item = &'a str>>(values: I) -> Vec<RValue<'a>> {
+        let mut rv = vec![];
+        for v in values {
+            rv.push(RValue::S(v.as_ref()));
+        }
+        rv
+    }
+
+    pub fn quoted_strings<'a, I: IntoIterator<Item = &'a str>>(values: I) -> Vec<RValue<'a>> {
+        let mut rv = vec![];
+        for v in values {
+            rv.push(RValue::QS(v.to_owned()));
+        }
+        rv
+    }
+
+    pub fn int<'a>(i: i64) -> Vec<RValue<'a>> {
+        Self::ints([i])
+    }
+
+    pub fn float<'a>(f: f64) -> Vec<RValue<'a>> {
+        Self::floats([f])
+    }
+
+    pub fn bool<'a>(b: bool) -> Vec<RValue<'a>> {
+        Self::bools([b])
+    }
+
+    pub fn string(s: &str) -> Vec<RValue> {
+        Self::strings([s])
+    }
+
+    pub fn quoted_string(s: &str) -> Vec<RValue> {
+        Self::quoted_strings([s])
+    }
 }
 
 impl<'a> RValue<'a> {
@@ -167,30 +244,6 @@ impl<'a> RValue<'a> {
             RValue::N(f) => Some(*f),
             _ => None,
         }
-    }
-
-    pub fn f_vec<I: IntoIterator<Item = f64>>(values: I) -> Vec<Self> {
-        let mut rv = vec![];
-        for v in values {
-            rv.push(RValue::N(v));
-        }
-        rv
-    }
-
-    pub fn s_vec<I: IntoIterator<Item = &'a str>>(values: I) -> Vec<Self> {
-        let mut rv = vec![];
-        for v in values {
-            rv.push(RValue::S(v));
-        }
-        rv
-    }
-
-    pub fn i_vec<I: IntoIterator<Item = i64>>(values: I) -> Vec<Self> {
-        Self::f_vec(values.into_iter().map(|i| i as f64))
-    }
-
-    pub fn i(i: i64) -> Vec<Self> {
-        Self::i_vec([i])
     }
 }
 
@@ -210,7 +263,7 @@ impl<'a> ToString for RValue<'a> {
                     })
                     .filter_map(identity)
                     .collect::<String>();
-                format!("\"{value}\"")
+                format!("\"{value}\"", value = &value)
             }
             RValue::S(s) => s.to_string(),
             RValue::N(n) => n.to_string(),
