@@ -29,10 +29,7 @@ mod test {
 
     #[test]
     fn test_string_simple() {
-        assert_matches!(
-            parse_string::<(_, ErrorKind)>("hello world"),
-            Ok((" world", RValue::S("hello")))
-        );
+        assert_matches!(parse_string::<(_, ErrorKind)>("hello world"), Ok((" world", RValue::S("hello"))));
     }
 
     #[test]

@@ -50,25 +50,19 @@ mod test {
 
     #[test]
     fn escaped_double_quote() {
-        let foo =
-            parse_quoted_string::<(&'static str, ErrorKind)>(r#""this is a \"quoted\" string""#)
-                .unwrap()
-                .1;
+        let foo = parse_quoted_string::<(&'static str, ErrorKind)>(r#""this is a \"quoted\" string""#)
+            .unwrap()
+            .1;
         assert_matches!(&foo, RValue::QS(qs) if qs == "this is a \"quoted\" string");
         assert_matches!(foo.to_string().as_str(), r#""this is a \"quoted\" string""#);
     }
 
     #[test]
     fn escaped_tabs() {
-        let foo = parse_quoted_string::<(&'static str, ErrorKind)>(
-            r#""this \\ is a \tquoted\t\n string""#,
-        )
-        .unwrap()
-        .1;
+        let foo = parse_quoted_string::<(&'static str, ErrorKind)>(r#""this \\ is a \tquoted\t\n string""#)
+            .unwrap()
+            .1;
         assert_matches!(&foo, RValue::QS(qs) if qs == "this \\ is a \tquoted\t\n string");
-        assert_matches!(
-            foo.to_string().as_str(),
-            r#""this \\ is a \tquoted\t\n string""#
-        );
+        assert_matches!(foo.to_string().as_str(), r#""this \\ is a \tquoted\t\n string""#);
     }
 }
